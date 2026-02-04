@@ -62,7 +62,7 @@ export function useUser(): UseUserReturn {
         .update({
           ...updates,
           updated_at: new Date().toISOString(),
-        })
+        } as never)
         .eq('id', user.id)
 
       if (error) throw error

@@ -142,7 +142,7 @@ export function useOrganization(): UseOrganizationReturn {
           name,
           slug,
           plan: 'free',
-        })
+        } as never)
         .select()
         .single()
 
@@ -152,10 +152,10 @@ export function useOrganization(): UseOrganizationReturn {
       const { error: memberError } = await supabase
         .from('organization_members')
         .insert({
-          organization_id: org.id,
+          organization_id: (org as Organization).id,
           user_id: user.id,
           role: 'owner',
-        })
+        } as never)
 
       if (memberError) throw memberError
 
@@ -163,10 +163,11 @@ export function useOrganization(): UseOrganizationReturn {
       await fetchOrganizations(user.id)
 
       // Set as active
-      localStorage.setItem(ACTIVE_ORG_KEY, org.id)
-      setOrganization(org)
+      const createdOrg = org as Organization
+      localStorage.setItem(ACTIVE_ORG_KEY, createdOrg.id)
+      setOrganization(createdOrg)
 
-      return { organization: org, error: null }
+      return { organization: createdOrg, error: null }
     } catch (err) {
       return { organization: null, error: err as Error }
     }
@@ -183,7 +184,7 @@ export function useOrganization(): UseOrganizationReturn {
         .update({
           ...updates,
           updated_at: new Date().toISOString(),
-        })
+        } as never)
         .eq('id', organization.id)
 
       if (error) throw error
@@ -196,7 +197,7 @@ export function useOrganization(): UseOrganizationReturn {
         .single()
 
       if (updatedOrg) {
-        setOrganization(updatedOrg)
+        setOrganization(updatedOrg as Organization)
       }
 
       return { error: null }
