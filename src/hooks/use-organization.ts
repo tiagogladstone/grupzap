@@ -22,6 +22,10 @@ interface OrganizationMember {
   created_at: string
 }
 
+interface MembershipWithOrg extends OrganizationMember {
+  organization: Organization | null
+}
+
 interface UseOrganizationReturn {
   organization: Organization | null
   membership: OrganizationMember | null
@@ -59,7 +63,9 @@ export function useOrganization(): UseOrganizationReturn {
 
       if (memberError) throw memberError
 
-      const orgs = memberships
+      const typedMemberships = memberships as MembershipWithOrg[] | null
+      
+      const orgs = typedMemberships
         ?.map(m => m.organization)
         .filter((org): org is Organization => org !== null) ?? []
 
@@ -77,10 +83,15 @@ export function useOrganization(): UseOrganizationReturn {
 
       if (activeOrg) {
         setOrganization(activeOrg)
-        const activeMembership = memberships?.find(
+        const activeMembership = typedMemberships?.find(
           m => m.organization_id === activeOrg!.id
         )
-        setMembership(activeMembership ?? null)
+        if (activeMembership) {
+          const { organization: _, ...membershipWithoutOrg } = activeMembership
+          setMembership(membershipWithoutOrg)
+        } else {
+          setMembership(null)
+        }
       }
     } catch (err) {
       setError(err as Error)
