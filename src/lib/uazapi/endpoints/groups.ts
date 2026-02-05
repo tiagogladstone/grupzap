@@ -11,9 +11,14 @@ import type {
   CreateGroupResponse,
   ModifyParticipantParams,
   InviteLinkResponse,
-  ParticipantAction,
   DisappearingDuration,
 } from '../types';
+
+/** Resposta genérica para operações de grupo */
+interface GroupOperationResponse {
+  success?: boolean;
+  message?: string;
+}
 
 export interface GroupsEndpoints {
   /**
@@ -34,27 +39,27 @@ export interface GroupsEndpoints {
   /**
    * Modifica um participante do grupo (add/remove/promote/demote).
    */
-  modifyParticipant(params: ModifyParticipantParams): Promise<ApiResponse<any>>;
+  modifyParticipant(params: ModifyParticipantParams): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Adiciona participante ao grupo.
    */
-  addParticipant(groupJid: string, phone: string): Promise<ApiResponse<any>>;
+  addParticipant(groupJid: string, phone: string): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Remove participante do grupo.
    */
-  removeParticipant(groupJid: string, phone: string): Promise<ApiResponse<any>>;
+  removeParticipant(groupJid: string, phone: string): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Promove participante a admin.
    */
-  promoteToAdmin(groupJid: string, phone: string): Promise<ApiResponse<any>>;
+  promoteToAdmin(groupJid: string, phone: string): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Rebaixa participante de admin.
    */
-  demoteFromAdmin(groupJid: string, phone: string): Promise<ApiResponse<any>>;
+  demoteFromAdmin(groupJid: string, phone: string): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Obtém link de convite do grupo.
@@ -64,42 +69,42 @@ export interface GroupsEndpoints {
   /**
    * Altera o nome do grupo.
    */
-  setName(groupJid: string, name: string): Promise<ApiResponse<any>>;
+  setName(groupJid: string, name: string): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Altera a descrição/tópico do grupo.
    */
-  setDescription(groupJid: string, description: string): Promise<ApiResponse<any>>;
+  setDescription(groupJid: string, description: string): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Altera a foto do grupo (JPEG base64).
    */
-  setPhoto(groupJid: string, imageBase64: string): Promise<ApiResponse<any>>;
+  setPhoto(groupJid: string, imageBase64: string): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Remove a foto do grupo.
    */
-  removePhoto(groupJid: string): Promise<ApiResponse<any>>;
+  removePhoto(groupJid: string): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Configura se apenas admins podem editar info do grupo.
    */
-  setLocked(groupJid: string, locked: boolean): Promise<ApiResponse<any>>;
+  setLocked(groupJid: string, locked: boolean): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Configura mensagens temporárias.
    */
-  setDisappearingMessages(groupJid: string, duration: DisappearingDuration): Promise<ApiResponse<any>>;
+  setDisappearingMessages(groupJid: string, duration: DisappearingDuration): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Configura modo de anúncio (apenas admins enviam mensagens).
    */
-  setAnnounce(groupJid: string, announce: boolean): Promise<ApiResponse<any>>;
+  setAnnounce(groupJid: string, announce: boolean): Promise<ApiResponse<GroupOperationResponse>>;
 
   /**
    * Sai do grupo.
    */
-  leave(groupJid: string): Promise<ApiResponse<any>>;
+  leave(groupJid: string): Promise<ApiResponse<GroupOperationResponse>>;
 }
 
 type RequestFn = <T>(method: string, endpoint: string, body?: object) => Promise<ApiResponse<T>>;
@@ -132,15 +137,15 @@ export function createGroupsEndpoints(request: RequestFn): GroupsEndpoints {
       });
     },
 
-    async modifyParticipant(params: ModifyParticipantParams): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/grupo/modificar', {
+    async modifyParticipant(params: ModifyParticipantParams): Promise<ApiResponse<GroupOperationResponse>> {
+      return request<GroupOperationResponse>('POST', '/grupo/modificar', {
         GroupJID: params.groupJid,
         action: params.action,
         remoteJid: params.participantJid,
       });
     },
 
-    async addParticipant(groupJid: string, phone: string): Promise<ApiResponse<any>> {
+    async addParticipant(groupJid: string, phone: string): Promise<ApiResponse<GroupOperationResponse>> {
       return this.modifyParticipant({
         groupJid,
         action: 'add',
@@ -148,7 +153,7 @@ export function createGroupsEndpoints(request: RequestFn): GroupsEndpoints {
       });
     },
 
-    async removeParticipant(groupJid: string, phone: string): Promise<ApiResponse<any>> {
+    async removeParticipant(groupJid: string, phone: string): Promise<ApiResponse<GroupOperationResponse>> {
       return this.modifyParticipant({
         groupJid,
         action: 'remove',
@@ -156,7 +161,7 @@ export function createGroupsEndpoints(request: RequestFn): GroupsEndpoints {
       });
     },
 
-    async promoteToAdmin(groupJid: string, phone: string): Promise<ApiResponse<any>> {
+    async promoteToAdmin(groupJid: string, phone: string): Promise<ApiResponse<GroupOperationResponse>> {
       return this.modifyParticipant({
         groupJid,
         action: 'promote',
@@ -164,7 +169,7 @@ export function createGroupsEndpoints(request: RequestFn): GroupsEndpoints {
       });
     },
 
-    async demoteFromAdmin(groupJid: string, phone: string): Promise<ApiResponse<any>> {
+    async demoteFromAdmin(groupJid: string, phone: string): Promise<ApiResponse<GroupOperationResponse>> {
       return this.modifyParticipant({
         groupJid,
         action: 'demote',
@@ -176,35 +181,35 @@ export function createGroupsEndpoints(request: RequestFn): GroupsEndpoints {
       return request<InviteLinkResponse>('GET', '/group/invitelink', { GroupJID: groupJid });
     },
 
-    async setName(groupJid: string, name: string): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/group/name', {
+    async setName(groupJid: string, name: string): Promise<ApiResponse<GroupOperationResponse>> {
+      return request<GroupOperationResponse>('POST', '/group/name', {
         GroupJID: groupJid,
         Name: name,
       });
     },
 
-    async setDescription(groupJid: string, description: string): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/group/description', {
+    async setDescription(groupJid: string, description: string): Promise<ApiResponse<GroupOperationResponse>> {
+      return request<GroupOperationResponse>('POST', '/group/description', {
         GroupJID: groupJid,
         Description: description,
       });
     },
 
-    async setPhoto(groupJid: string, imageBase64: string): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/group/photo', {
+    async setPhoto(groupJid: string, imageBase64: string): Promise<ApiResponse<GroupOperationResponse>> {
+      return request<GroupOperationResponse>('POST', '/group/photo', {
         GroupJID: groupJid,
         Image: imageBase64,
       });
     },
 
-    async removePhoto(groupJid: string): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/group/photo/remove', {
+    async removePhoto(groupJid: string): Promise<ApiResponse<GroupOperationResponse>> {
+      return request<GroupOperationResponse>('POST', '/group/photo/remove', {
         groupjid: groupJid,
       });
     },
 
-    async setLocked(groupJid: string, locked: boolean): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/group/locked', {
+    async setLocked(groupJid: string, locked: boolean): Promise<ApiResponse<GroupOperationResponse>> {
+      return request<GroupOperationResponse>('POST', '/group/locked', {
         groupjid: groupJid,
         locked,
       });
@@ -213,22 +218,22 @@ export function createGroupsEndpoints(request: RequestFn): GroupsEndpoints {
     async setDisappearingMessages(
       groupJid: string,
       duration: DisappearingDuration
-    ): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/group/ephemeral', {
+    ): Promise<ApiResponse<GroupOperationResponse>> {
+      return request<GroupOperationResponse>('POST', '/group/ephemeral', {
         groupjid: groupJid,
         duration,
       });
     },
 
-    async setAnnounce(groupJid: string, announce: boolean): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/group/announce', {
+    async setAnnounce(groupJid: string, announce: boolean): Promise<ApiResponse<GroupOperationResponse>> {
+      return request<GroupOperationResponse>('POST', '/group/announce', {
         groupjid: groupJid,
         announce,
       });
     },
 
-    async leave(groupJid: string): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/group/leave', {
+    async leave(groupJid: string): Promise<ApiResponse<GroupOperationResponse>> {
+      return request<GroupOperationResponse>('POST', '/group/leave', {
         GroupJID: groupJid,
       });
     },

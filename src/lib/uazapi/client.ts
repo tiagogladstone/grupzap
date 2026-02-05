@@ -6,9 +6,9 @@
 import type {
   UazapiConfig,
   ApiResponse,
-  ApiError,
   LogLevel,
   LogEntry,
+  SendMessageResponse,
 } from './types';
 
 import { createInstanceEndpoints, type InstanceEndpoints } from './endpoints/instance';
@@ -44,10 +44,10 @@ class Logger {
     this.debugEnabled = debugEnabled;
   }
 
-  private log(level: LogLevel, message: string, context?: Record<string, any>): void {
+  private log(level: LogLevel, message: string, context?: Record<string, unknown>): void {
     if (level === 'debug' && !this.debugEnabled) return;
 
-    const entry: LogEntry = {
+    const _entry: LogEntry = {
       level,
       message,
       timestamp: new Date().toISOString(),
@@ -71,19 +71,19 @@ class Logger {
     }
   }
 
-  debugLog(message: string, context?: Record<string, any>): void {
+  debugLog(message: string, context?: Record<string, unknown>): void {
     this.log('debug', message, context);
   }
 
-  info(message: string, context?: Record<string, any>): void {
+  info(message: string, context?: Record<string, unknown>): void {
     this.log('info', message, context);
   }
 
-  warn(message: string, context?: Record<string, any>): void {
+  warn(message: string, context?: Record<string, unknown>): void {
     this.log('warn', message, context);
   }
 
-  error(message: string, context?: Record<string, any>): void {
+  error(message: string, context?: Record<string, unknown>): void {
     this.log('error', message, context);
   }
 }
@@ -316,7 +316,7 @@ export class UazapiClient {
   /**
    * Envia mensagem de texto simples (atalho)
    */
-  async send(phone: string, message: string): Promise<ApiResponse<any>> {
+  async send(phone: string, message: string): Promise<ApiResponse<SendMessageResponse>> {
     return this.messages.sendText({ phone, message });
   }
 
@@ -327,7 +327,7 @@ export class UazapiClient {
     phone: string,
     message: string,
     typingDurationMs: number = 2000
-  ): Promise<ApiResponse<any>> {
+  ): Promise<ApiResponse<SendMessageResponse>> {
     await this.messages.sendPresence({ phone, state: 'composing' });
     await this.sleep(typingDurationMs);
     await this.messages.sendPresence({ phone, state: 'paused' });

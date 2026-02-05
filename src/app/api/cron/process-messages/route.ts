@@ -166,7 +166,7 @@ async function updateMessageStatus(
   externalMessageId?: string,
   errorMessage?: string
 ): Promise<void> {
-  const update: Record<string, any> = {
+  const update: Record<string, string | undefined> = {
     status: success ? 'sent' : 'failed',
     ...(success && { sent_at: new Date().toISOString() }),
     ...(externalMessageId && { external_message_id: externalMessageId }),

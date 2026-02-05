@@ -260,7 +260,7 @@ export interface WebhookTextMessage {
   extendedTextMessage?: {
     text: string;
     contextInfo?: {
-      quotedMessage?: any;
+      quotedMessage?: unknown;
       stanzaId?: string;
       participant?: string;
     };
@@ -312,9 +312,9 @@ export interface WebhookMessage {
     videoMessage?: WebhookVideoMessage;
     audioMessage?: WebhookAudioMessage;
     documentMessage?: WebhookDocumentMessage;
-    stickerMessage?: any;
-    locationMessage?: any;
-    contactMessage?: any;
+    stickerMessage?: unknown;
+    locationMessage?: unknown;
+    contactMessage?: unknown;
   };
   messageTimestamp: number;
   pushName: string;
@@ -395,5 +395,5 @@ export interface LogEntry {
   level: LogLevel;
   message: string;
   timestamp: string;
-  context?: Record<string, any>;
+  context?: Record<string, unknown>;
 }

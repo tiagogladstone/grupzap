@@ -67,17 +67,32 @@ export interface MessagesEndpoints {
   /**
    * Envia indicador de presença (digitando/gravando).
    */
-  sendPresence(params: PresenceState): Promise<ApiResponse<any>>;
+  sendPresence(params: PresenceState): Promise<ApiResponse<PresenceResponse>>;
 
   /**
    * Reage a uma mensagem com emoji.
    */
-  react(params: ReactParams): Promise<ApiResponse<any>>;
+  react(params: ReactParams): Promise<ApiResponse<ReactResponse>>;
 
   /**
    * Marca mensagens como lidas.
    */
-  markAsRead(params: MarkReadParams): Promise<ApiResponse<any>>;
+  markAsRead(params: MarkReadParams): Promise<ApiResponse<MarkReadResponse>>;
+}
+
+/** Resposta para operação de presença */
+interface PresenceResponse {
+  success?: boolean;
+}
+
+/** Resposta para operação de reação */
+interface ReactResponse {
+  success?: boolean;
+}
+
+/** Resposta para marcar como lido */
+interface MarkReadResponse {
+  success?: boolean;
 }
 
 type RequestFn = <T>(method: string, endpoint: string, body?: object) => Promise<ApiResponse<T>>;
@@ -196,24 +211,24 @@ export function createMessagesEndpoints(request: RequestFn): MessagesEndpoints {
       });
     },
 
-    async sendPresence(params: PresenceState): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/chat/presence', {
+    async sendPresence(params: PresenceState): Promise<ApiResponse<PresenceResponse>> {
+      return request<PresenceResponse>('POST', '/chat/presence', {
         Phone: params.phone,
         State: params.state,
         Media: params.media || '',
       });
     },
 
-    async react(params: ReactParams): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/chat/react', {
+    async react(params: ReactParams): Promise<ApiResponse<ReactResponse>> {
+      return request<ReactResponse>('POST', '/chat/react', {
         Phone: params.phone,
         Id: params.messageId,
         Body: params.emoji,
       });
     },
 
-    async markAsRead(params: MarkReadParams): Promise<ApiResponse<any>> {
-      return request<any>('POST', '/chat/markread', {
+    async markAsRead(params: MarkReadParams): Promise<ApiResponse<MarkReadResponse>> {
+      return request<MarkReadResponse>('POST', '/chat/markread', {
         Id: params.messageIds,
         ChatPhone: params.chatPhone,
         SenderPhone: params.senderPhone,

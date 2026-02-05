@@ -10,6 +10,12 @@ import type {
   WebhookEvent,
 } from '../types';
 
+/** Resposta genérica para operações de webhook */
+interface WebhookOperationResponse {
+  success?: boolean;
+  message?: string;
+}
+
 export interface WebhooksEndpoints {
   /**
    * Configura URL do webhook para receber eventos.
@@ -24,12 +30,12 @@ export interface WebhooksEndpoints {
   /**
    * Configura chave HMAC para assinatura de webhooks.
    */
-  setHmacKey(key: string): Promise<ApiResponse<any>>;
+  setHmacKey(key: string): Promise<ApiResponse<WebhookOperationResponse>>;
 
   /**
    * Atualiza eventos inscritos no webhook.
    */
-  setEvents(events: WebhookEvent[]): Promise<ApiResponse<any>>;
+  setEvents(events: WebhookEvent[]): Promise<ApiResponse<{ webhook: string }>>;
 }
 
 /**
@@ -58,16 +64,16 @@ export function createWebhooksEndpoints(request: RequestFn): WebhooksEndpoints {
       return request<WebhookResponse>('GET', '/webhook');
     },
 
-    async setHmacKey(key: string): Promise<ApiResponse<any>> {
+    async setHmacKey(key: string): Promise<ApiResponse<WebhookOperationResponse>> {
       if (key.length < 32) {
         throw new Error('HMAC key must be at least 32 characters');
       }
-      return request<any>('POST', '/session/hmac/config', {
+      return request<WebhookOperationResponse>('POST', '/session/hmac/config', {
         hmac_key: key,
       });
     },
 
-    async setEvents(events: WebhookEvent[]): Promise<ApiResponse<any>> {
+    async setEvents(events: WebhookEvent[]): Promise<ApiResponse<{ webhook: string }>> {
       // Re-configura webhook com novos eventos
       const current = await this.get();
       return this.configure({
