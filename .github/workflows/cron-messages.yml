@@ -1,0 +1,26 @@
+name: Process Scheduled Messages
+
+on:
+  schedule:
+    # Roda a cada minuto
+    - cron: '* * * * *'
+  workflow_dispatch: # Permite rodar manualmente para testes
+
+jobs:
+  process-messages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger message processing
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.APP_URL }}/api/cron/process-messages")
+          
+          if [ "$response" != "200" ]; then
+            echo "❌ Failed with status: $response"
+            exit 1
+          fi
+          
+          echo "✅ Messages processed successfully"
