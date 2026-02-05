@@ -42,3 +42,4 @@ next-env.d.ts
 
 # Allow env example
 !.env.example
+.env*.local
