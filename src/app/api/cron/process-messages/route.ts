@@ -125,7 +125,6 @@ async function markAsProcessing(
     .from('scheduled_messages')
     .update({
       status: 'processing',
-      attempts: supabase.rpc ? undefined : 1, // Incrementado na query se RPC disponível
     })
     .eq('id', messageId)
     .eq('status', 'pending'); // Double-check para evitar race condition
@@ -237,7 +236,7 @@ async function sendMessage(message: ScheduledMessage): Promise<{ success: boolea
         }
         response = await uazapi.messages.sendAudio({
           phone,
-          media: message.media_url,
+          audio: message.media_url,
         });
         break;
         
@@ -248,7 +247,7 @@ async function sendMessage(message: ScheduledMessage): Promise<{ success: boolea
         response = await uazapi.messages.sendDocument({
           phone,
           media: message.media_url,
-          fileName: 'document', // TODO: extrair do metadata
+          filename: 'document', // TODO: extrair do metadata
         });
         break;
         
@@ -262,8 +261,8 @@ async function sendMessage(message: ScheduledMessage): Promise<{ success: boolea
         return { success: false, error: `Tipo de mensagem desconhecido: ${message.message_type}` };
     }
     
-    // Extrai ID da mensagem da resposta
-    const messageId = response?.data?.key?.id || response?.data?.id;
+    // Extrai ID da mensagem da resposta (SendMessageResponse tem Id)
+    const messageId = response?.data?.Id;
     
     return { success: true, messageId };
     
