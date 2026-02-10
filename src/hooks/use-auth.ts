@@ -13,8 +13,8 @@ interface AuthState {
 
 interface AuthActions {
   signInWithEmail: (email: string, password: string) => Promise<{ error: AuthError | null }>
-  signInWithMagicLink: (email: string) => Promise<{ error: AuthError | null }>
-  signUp: (email: string, password: string, metadata?: Record<string, unknown>) => Promise<{ error: AuthError | null }>
+  signInWithMagicLink: (email: string, redirectTo?: string) => Promise<{ error: AuthError | null }>
+  signUp: (email: string, password: string, metadata?: Record<string, unknown>, redirectTo?: string) => Promise<{ error: AuthError | null }>
   signOut: () => Promise<{ error: AuthError | null }>
   resetPassword: (email: string) => Promise<{ error: AuthError | null }>
   updatePassword: (newPassword: string) => Promise<{ error: AuthError | null }>
@@ -77,11 +77,12 @@ export function useAuth(): AuthState & AuthActions {
     return { error }
   }, [supabase])
 
-  const signInWithMagicLink = useCallback(async (email: string) => {
+  const signInWithMagicLink = useCallback(async (email: string, redirectTo?: string) => {
+    const callbackUrl = `${window.location.origin}/auth/callback${redirectTo ? `?next=${encodeURIComponent(redirectTo)}` : ''}`
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: callbackUrl,
       },
     })
     return { error }
@@ -90,13 +91,15 @@ export function useAuth(): AuthState & AuthActions {
   const signUp = useCallback(async (
     email: string,
     password: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    redirectTo?: string
   ) => {
+    const callbackUrl = `${window.location.origin}/auth/callback${redirectTo ? `?next=${encodeURIComponent(redirectTo)}` : ''}`
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: callbackUrl,
         data: metadata,
       },
     })
@@ -110,7 +113,7 @@ export function useAuth(): AuthState & AuthActions {
 
   const resetPassword = useCallback(async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback?type=recovery`,
+      redirectTo: `${window.location.origin}/auth/callback?type=recovery&next=/reset-password`,
     })
     return { error }
   }, [supabase])

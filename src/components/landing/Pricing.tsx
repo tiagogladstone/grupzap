@@ -6,52 +6,54 @@ export function Pricing() {
       price: "97",
       period: "/mês",
       features: [
-        "1 número conectado",
-        "Até 10 grupos",
+        "2 instâncias WhatsApp",
+        "Até 50 grupos",
+        "500 mensagens/mês",
         "Agendamento de mensagens",
         "Monitoramento de entrada/saída",
-        "Link de redirecionamento",
         "Suporte por email",
       ],
       cta: "Começar agora",
       popular: false,
+      planSlug: "starter",
     },
     {
-      name: "Profissional",
+      name: "Pro",
       description: "Para lançadores sérios",
       price: "197",
       period: "/mês",
       features: [
-        "3 números conectados",
-        "Grupos ilimitados",
+        "5 instâncias WhatsApp",
+        "Até 200 grupos",
+        "2.000 mensagens/mês",
         "Agendamento de mensagens",
         "Monitoramento de entrada/saída",
-        "Link de redirecionamento",
-        "@Todos personalizado",
         "Relatórios avançados",
         "Integrações webhook",
         "Suporte prioritário",
       ],
       cta: "Começar agora",
       popular: true,
+      planSlug: "pro",
     },
     {
-      name: "Agência",
+      name: "Enterprise",
       description: "Para times e agências",
-      price: "397",
+      price: "497",
       period: "/mês",
       features: [
-        "10 números conectados",
+        "20 instâncias WhatsApp",
         "Grupos ilimitados",
-        "Tudo do Profissional",
-        "Sub-contas para clientes",
+        "Mensagens ilimitadas",
+        "Tudo do Pro",
         "API personalizada",
         "Relatórios white-label",
         "Onboarding dedicado",
-        "Suporte via WhatsApp",
+        "Suporte dedicado",
       ],
       cta: "Falar com vendas",
       popular: false,
+      planSlug: "enterprise",
     },
   ];
 
@@ -133,7 +135,7 @@ export function Pricing() {
 
               {/* CTA */}
               <a
-                href="#"
+                href={plan.planSlug === 'enterprise' ? 'mailto:contato@grupzap.com' : `/signup?plan=${plan.planSlug}`}
                 className={`block w-full py-3 text-center rounded-xl font-medium transition-all ${
                   plan.popular
                     ? "bg-[#25D366] text-white hover:bg-[#128C7E]"

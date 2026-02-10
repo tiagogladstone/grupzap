@@ -7,7 +7,7 @@ import type { User } from '@supabase/supabase-js'
 interface UserProfile {
   id: string
   email: string
-  full_name: string | null
+  name: string | null
   avatar_url: string | null
   created_at: string
   updated_at: string
@@ -33,8 +33,8 @@ export function useUser(): UseUserReturn {
   const fetchProfile = async (userId: string) => {
     try {
       const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
+        .from('users')
+        .select('id, email, name, avatar_url, created_at, updated_at')
         .eq('id', userId)
         .single()
 
@@ -58,7 +58,7 @@ export function useUser(): UseUserReturn {
 
     try {
       const { error } = await supabase
-        .from('profiles')
+        .from('users')
         .update({
           ...updates,
           updated_at: new Date().toISOString(),

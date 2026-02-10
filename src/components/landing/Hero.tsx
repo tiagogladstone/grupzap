@@ -32,7 +32,7 @@ export function Hero() {
         {/* CTAs */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12">
           <a
-            href="#precos"
+            href="/signup"
             className="w-full sm:w-auto px-8 py-4 text-lg font-semibold text-white bg-[#25D366] rounded-xl hover:bg-[#128C7E] transition-all transform hover:scale-105 glow"
           >
             Começar 7 dias grátis

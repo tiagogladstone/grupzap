@@ -1,27 +1,32 @@
 # Configuração do Sistema de Cron - Mensagens Agendadas
 
-Este documento explica como funciona o sistema de processamento de mensagens agendadas usando Vercel Cron.
+Este documento explica como funciona o sistema de processamento de mensagens agendadas usando Vercel Cron ou Google Cloud Scheduler.
 
 ## 📋 Visão Geral
 
-O Grupzap usa **Vercel Cron** para processar mensagens agendadas. Isso substitui o `pg_cron` do PostgreSQL que não está disponível no plano gratuito do Supabase.
+O Grupzap usa cron jobs externos para processar mensagens agendadas. Isso substitui o `pg_cron` do PostgreSQL que não está disponível no plano gratuito do Supabase.
+
+**Duas opções disponíveis:**
+- **Vercel Cron** (recomendado para simplicidade, limitado no plano Hobby)
+- **Google Cloud Scheduler** (recomendado para produção, maior flexibilidade)
 
 ### Arquitetura
 
 ```
-┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│   Vercel Cron   │ ───▶ │   API Route     │ ───▶ │    Supabase     │
-│  (scheduler)    │      │ /api/cron/...   │      │   (database)    │
-└─────────────────┘      └────────┬────────┘      └─────────────────┘
-                                  │
-                                  ▼
-                         ┌─────────────────┐
-                         │     UAZAPI      │
-                         │   (WhatsApp)    │
-                         └─────────────────┘
+┌──────────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│   Vercel Cron ou     │ ───▶ │   API Route     │ ───▶ │    Supabase     │
+│ Google Cloud         │      │ /api/cron/...   │      │   (database)    │
+│   Scheduler          │      │                 │      │                 │
+└──────────────────────┘      └────────┬────────┘      └─────────────────┘
+                                       │
+                                       ▼
+                              ┌─────────────────┐
+                              │     UAZAPI      │
+                              │   (WhatsApp)    │
+                              └─────────────────┘
 ```
 
-1. **Vercel Cron** dispara a cada minuto (ou 1x/dia no plano Hobby)
+1. **Cron Scheduler** dispara periodicamente (a cada 5 minutos recomendado)
 2. **API Route** busca mensagens pendentes no Supabase
 3. **UAZAPI Client** envia as mensagens via WhatsApp
 4. **Status** é atualizado no banco (sent/failed)
@@ -44,7 +49,9 @@ No plano **Hobby**, o cron só pode rodar **uma vez por dia**. Isso significa qu
 
 **Para usar a cada minuto:** Faça upgrade para o plano Pro.
 
-## 🔧 Configuração
+---
+
+## 🔧 OPÇÃO 1: Vercel Cron (Mais Simples)
 
 ### 1. Variáveis de Ambiente
 
@@ -108,6 +115,230 @@ Após o deploy, o cron aparecerá no Vercel Dashboard:
 1. Acesse seu projeto no Vercel
 2. Vá em **Settings** > **Cron Jobs**
 3. Você verá o job listado com próxima execução
+
+---
+
+## 🔧 OPÇÃO 2: Google Cloud Scheduler (Produção)
+
+### Por que usar Google Cloud Scheduler?
+
+- Funcionalidade completa no Free Tier (3 jobs gratuitos)
+- Execução a cada minuto sem limitações
+- Maior confiabilidade e controle
+- Monitoramento e logs detalhados
+- Retry automático configurável
+
+### Pré-requisitos
+
+1. Conta Google Cloud com billing ativo (mas permanecerá no Free Tier)
+2. Google Cloud CLI instalado (opcional, pode usar console web)
+3. Projeto criado no Google Cloud Console
+
+### Passo a Passo
+
+#### 1. Criar Projeto no Google Cloud
+
+```bash
+# Via CLI
+gcloud projects create grupzap-prod --name="Grupzap Production"
+gcloud config set project grupzap-prod
+
+# Ou via Console Web
+# Acesse: https://console.cloud.google.com/projectcreate
+```
+
+#### 2. Habilitar APIs Necessárias
+
+```bash
+# Via CLI
+gcloud services enable cloudscheduler.googleapis.com
+
+# Ou via Console Web
+# Cloud Scheduler API: https://console.cloud.google.com/apis/library/cloudscheduler.googleapis.com
+```
+
+#### 3. Configurar Variáveis de Ambiente no Vercel
+
+Certifique-se de ter configurado:
+
+```env
+CRON_SECRET=sua-chave-secreta-muito-longa-aqui
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key
+```
+
+#### 4. Criar o Job no Cloud Scheduler
+
+**Via Console Web (mais fácil):**
+
+1. Acesse: https://console.cloud.google.com/cloudscheduler
+2. Clique em **CREATE JOB**
+3. Configure:
+   - **Name:** `grupzap-process-messages`
+   - **Region:** `us-central1` (ou mais próximo do seu Vercel)
+   - **Frequency:** `*/5 * * * *` (a cada 5 minutos)
+   - **Timezone:** `America/Sao_Paulo`
+   - **Target type:** HTTP
+   - **URL:** `https://seu-dominio.vercel.app/api/cron/process-messages`
+   - **HTTP method:** GET
+   - **Auth header:** Add OAuth token ou Add OIDC token (escolha "Add OAuth token")
+     - **Service account:** (crie um novo se necessário)
+   - Em **Headers**, adicione:
+     - Key: `Authorization`
+     - Value: `Bearer SEU_CRON_SECRET`
+   - **Retry configuration:**
+     - Max retry attempts: 3
+     - Max retry duration: 10 minutes
+     - Min/Max backoff: 5s / 300s
+
+**Via CLI:**
+
+```bash
+gcloud scheduler jobs create http grupzap-process-messages \
+  --location=us-central1 \
+  --schedule="*/5 * * * *" \
+  --uri="https://seu-dominio.vercel.app/api/cron/process-messages" \
+  --http-method=GET \
+  --headers="Authorization=Bearer SEU_CRON_SECRET" \
+  --attempt-deadline=60s \
+  --max-retry-attempts=3 \
+  --max-retry-duration=10m \
+  --time-zone="America/Sao_Paulo" \
+  --description="Processa mensagens agendadas do Grupzap a cada 5 minutos"
+```
+
+**Importante:** Substitua:
+- `seu-dominio.vercel.app` pelo seu domínio real
+- `SEU_CRON_SECRET` pelo valor real da variável de ambiente
+
+#### 5. Testar o Job
+
+```bash
+# Executar manualmente (via CLI)
+gcloud scheduler jobs run grupzap-process-messages --location=us-central1
+
+# Ou via Console Web
+# Acesse o job e clique em "FORCE RUN"
+```
+
+#### 6. Monitorar Execuções
+
+**Via Console Web:**
+1. Acesse: https://console.cloud.google.com/cloudscheduler
+2. Clique no job `grupzap-process-messages`
+3. Veja histórico na aba **Execution History**
+4. Veja logs detalhados em **View Logs** (Google Cloud Logging)
+
+**Via CLI:**
+```bash
+# Listar jobs
+gcloud scheduler jobs list --location=us-central1
+
+# Ver detalhes de um job
+gcloud scheduler jobs describe grupzap-process-messages --location=us-central1
+
+# Ver logs (requer logging API habilitada)
+gcloud logging read "resource.type=cloud_scheduler_job AND resource.labels.job_id=grupzap-process-messages" --limit 50 --format json
+```
+
+### Configuração Recomendada para Produção
+
+| Parâmetro | Valor Recomendado | Motivo |
+|-----------|-------------------|--------|
+| **Frequência** | `*/5 * * * *` (a cada 5 minutos) | Balanceia latência e custos |
+| **Timeout** | 60 segundos | Tempo suficiente para processar batch |
+| **Max Retry** | 3 tentativas | Evita custos excessivos em caso de erro |
+| **Backoff** | 5s min, 300s max | Retry gradual para erros temporários |
+| **Timezone** | America/Sao_Paulo | Horário local do Brasil |
+
+### Frequências Alternativas
+
+```bash
+# A cada minuto (máxima responsividade)
+--schedule="* * * * *"
+
+# A cada 10 minutos (economia de custos)
+--schedule="*/10 * * * *"
+
+# A cada hora (baixo volume)
+--schedule="0 * * * *"
+
+# Horário comercial apenas (9h-18h, dias úteis)
+--schedule="*/5 9-18 * * 1-5"
+```
+
+### Custos
+
+Google Cloud Scheduler Free Tier:
+- **3 jobs gratuitos por mês**
+- Jobs adicionais: $0.10/job/mês
+- Execuções gratuitas: sem custo adicional
+
+Para o Grupzap com 1 job a cada 5 minutos:
+- **Custo: $0.00/mês** (dentro do Free Tier)
+
+### Segurança
+
+**Autenticação:**
+O Cloud Scheduler envia requests com o header `Authorization: Bearer CRON_SECRET`.
+A API Route valida este header antes de processar.
+
+**Recomendações:**
+- Use CRON_SECRET forte (32+ caracteres aleatórios)
+- Não exponha o secret em logs ou console
+- Rotacione o secret periodicamente (a cada 90 dias)
+- Use HTTPS sempre (Vercel já força HTTPS)
+
+### Atualizar um Job Existente
+
+```bash
+# Atualizar frequência
+gcloud scheduler jobs update http grupzap-process-messages \
+  --location=us-central1 \
+  --schedule="*/10 * * * *"
+
+# Atualizar URL
+gcloud scheduler jobs update http grupzap-process-messages \
+  --location=us-central1 \
+  --uri="https://novo-dominio.vercel.app/api/cron/process-messages"
+
+# Atualizar headers (trocar secret)
+gcloud scheduler jobs update http grupzap-process-messages \
+  --location=us-central1 \
+  --update-headers="Authorization=Bearer NOVO_CRON_SECRET"
+```
+
+### Deletar um Job
+
+```bash
+gcloud scheduler jobs delete grupzap-process-messages --location=us-central1
+```
+
+---
+
+## 📊 Comparação: Vercel Cron vs Google Cloud Scheduler
+
+| Característica | Vercel Cron | Google Cloud Scheduler |
+|----------------|-------------|------------------------|
+| **Setup** | Muito simples (vercel.json) | Moderado (CLI ou Console) |
+| **Plano Gratuito** | 2 jobs, 1x/dia | 3 jobs, execuções ilimitadas |
+| **Frequência Máxima** | 1x/minuto (Pro) / 1x/dia (Hobby) | 1x/minuto (qualquer plano) |
+| **Confiabilidade** | Alta | Muito alta |
+| **Monitoramento** | Logs básicos no Vercel | Logs detalhados + métricas |
+| **Retry** | Automático | Configurável (tentativas, backoff) |
+| **Custo (Pro)** | Incluído nos $20/mês | Gratuito (3 jobs) |
+| **Recomendado para** | Protótipos, MVPs | Produção, alto volume |
+
+### Recomendação Final
+
+- **Desenvolvimento/MVP:** Use Vercel Cron (simplicidade)
+- **Produção com Vercel Pro:** Use Vercel Cron (já incluso)
+- **Produção com Vercel Hobby:** Use Google Cloud Scheduler (sem limitações)
+- **Produção crítica:** Use Google Cloud Scheduler (maior controle)
+
+---
+
+## 🧪 Testando Localmente
 
 ## 🧪 Testando Localmente
 
@@ -286,8 +517,41 @@ WHERE id = 'uuid-da-mensagem';
 2. Reduza o `BATCH_SIZE` se necessário
 3. Verifique latência entre Vercel e UAZAPI
 
+## 🔐 Variáveis de Ambiente Necessárias
+
+Configurar no Vercel Dashboard (Settings > Environment Variables):
+
+```env
+# Segurança - Obrigatório
+CRON_SECRET=sua-chave-secreta-muito-longa-aqui
+
+# Supabase (já deve estar configurado)
+NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=sua-anon-key
+SUPABASE_SERVICE_ROLE_KEY=sua-service-role-key
+
+# UAZAPI (já deve estar configurado)
+UAZAPI_BASE_URL=https://seu-servidor.uazapi.dev
+UAZAPI_TOKEN=seu-token
+```
+
+**Como gerar CRON_SECRET:**
+
+```bash
+# Opção 1: OpenSSL
+openssl rand -base64 32
+
+# Opção 2: Node.js
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+
+# Opção 3: Online (use site confiável)
+# https://www.random.org/strings/
+```
+
 ## 📚 Referências
 
 - [Vercel Cron Jobs Documentation](https://vercel.com/docs/cron-jobs)
+- [Google Cloud Scheduler Documentation](https://cloud.google.com/scheduler/docs)
 - [Cron Expression Generator](https://crontab.guru/)
 - [Supabase RPC Functions](https://supabase.com/docs/guides/database/functions)
+- [Google Cloud Free Tier](https://cloud.google.com/free)

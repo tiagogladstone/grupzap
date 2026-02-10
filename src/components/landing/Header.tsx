@@ -39,11 +39,11 @@ export function Header() {
 
           {/* CTA */}
           <div className="hidden md:flex items-center gap-4">
-            <a href="#" className="text-sm text-[var(--muted)] hover:text-[var(--foreground)] transition-colors">
+            <a href="/login" className="text-sm text-[var(--muted)] hover:text-[var(--foreground)] transition-colors">
               Entrar
             </a>
             <a
-              href="#precos"
+              href="/signup"
               className="px-4 py-2 text-sm font-medium text-white bg-[#25D366] rounded-lg hover:bg-[#128C7E] transition-colors"
             >
               Começar Grátis
@@ -82,11 +82,11 @@ export function Header() {
                 FAQ
               </a>
               <hr className="border-[var(--border)]" />
-              <a href="#" className="text-sm text-[var(--muted)]">
+              <a href="/login" className="text-sm text-[var(--muted)]">
                 Entrar
               </a>
               <a
-                href="#precos"
+                href="/signup"
                 className="px-4 py-2 text-sm font-medium text-center text-white bg-[#25D366] rounded-lg"
               >
                 Começar Grátis

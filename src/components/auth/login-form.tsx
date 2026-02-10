@@ -36,7 +36,7 @@ export function LoginForm() {
         router.push(redirectTo)
         router.refresh()
       } else {
-        const { error } = await signInWithMagicLink(email)
+        const { error } = await signInWithMagicLink(email, redirectTo)
         if (error) {
           setError(error.message)
           return
@@ -164,7 +164,7 @@ export function LoginForm() {
       {/* Sign Up Link */}
       <p className="text-center text-sm text-gray-600">
         Não tem uma conta?{' '}
-        <Link href="/signup" className="text-blue-600 hover:underline font-medium">
+        <Link href={redirectTo !== '/dashboard' ? `/signup?redirectTo=${encodeURIComponent(redirectTo)}` : '/signup'} className="text-blue-600 hover:underline font-medium">
           Criar conta
         </Link>
       </p>

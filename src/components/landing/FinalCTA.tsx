@@ -30,13 +30,13 @@ export function FinalCTA() {
             
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <a
-                href="#precos"
+                href="/signup"
                 className="w-full sm:w-auto px-8 py-4 text-lg font-semibold text-[#25D366] bg-white rounded-xl hover:bg-gray-100 transition-all transform hover:scale-105"
               >
                 Começar 7 dias grátis
               </a>
               <a
-                href="#"
+                href="#como-funciona"
                 className="w-full sm:w-auto px-8 py-4 text-lg font-semibold text-white bg-white/20 border border-white/30 rounded-xl hover:bg-white/30 transition-all"
               >
                 Ver demonstração

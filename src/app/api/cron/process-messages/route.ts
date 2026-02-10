@@ -1,163 +1,320 @@
 /**
- * API Route: Process Scheduled Messages
- * 
- * Esta rota é chamada pelo Vercel Cron para processar mensagens agendadas.
- * Substitui o pg_cron que não está disponível no Supabase Free tier.
- * 
+ * API Route: Process Scheduled Messages (Multi-Instance + Locking)
+ *
+ * Esta rota e chamada pelo cron (Google Cloud Scheduler / Vercel Cron)
+ * para processar mensagens agendadas de TODAS as instancias WhatsApp.
+ *
+ * Melhorias sobre a versao anterior:
+ * - FOR UPDATE SKIP LOCKED via RPC (evita race condition entre crons)
+ * - UazapiClient criado por instancia (multi-tenant)
+ * - timingSafeEqual para CRON_SECRET
+ * - Suporte a sticker, location, contact
+ * - media_filename do banco (nao hardcoded)
+ * - Retry de mensagens falhadas via RPC
+ *
  * @endpoint GET /api/cron/process-messages
- * @auth Header CRON_SECRET obrigatório
- * @schedule Vercel Pro: cada minuto | Vercel Hobby: 1x por dia
+ * @endpoint POST /api/cron/process-messages
+ * @auth Header Authorization: Bearer CRON_SECRET
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { createUazapiClient } from '@/lib/uazapi';
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import { timingSafeEqual } from 'crypto'
+import { UazapiClient } from '@/lib/uazapi'
 
-// Tipos
-interface ScheduledMessage {
-  id: string;
-  target_jid: string;
-  message_type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'location' | 'contact';
-  content: string | null;
-  caption: string | null;
-  media_url: string | null;
-  attempts: number;
-  max_attempts: number;
-  instance: {
-    api_token: string;
-    api_url: string;
-  };
+// ============================================================================
+// TIPOS
+// ============================================================================
+
+/** Mensagem retornada pela RPC fetch_and_lock_pending_messages */
+interface LockedMessage {
+  id: string
+  target_jid: string
+  target_type: string
+  message_type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'location' | 'contact'
+  content: string | null
+  caption: string | null
+  media_url: string | null
+  media_filename: string | null
+  media_mime_type: string | null
+  buttons: unknown | null
+  attempts: number
+  max_attempts: number
+  instance_api_token: string
+  instance_id_external: string
+  scheduled_message_id: string
+}
+
+interface SendResult {
+  success: boolean
+  messageId?: string
+  error?: string
 }
 
 interface ProcessResult {
-  processed: number;
-  sent: number;
-  failed: number;
-  errors: Array<{ id: string; error: string }>;
+  processed: number
+  sent: number
+  failed: number
+  errors: Array<{ id: string; error: string }>
 }
 
-// Constantes
-const BATCH_SIZE = 10;
+// ============================================================================
+// CONSTANTES
+// ============================================================================
+
+const BATCH_SIZE = 10
+
+// ============================================================================
+// AUTENTICACAO
+// ============================================================================
 
 /**
- * Verifica autenticação via CRON_SECRET
+ * Verifica CRON_SECRET com timingSafeEqual (previne timing attacks)
  */
 function verifyAuth(request: NextRequest): boolean {
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
-  
+  const authHeader = request.headers.get('authorization')
+  const cronSecret = process.env.CRON_SECRET
+
   if (!cronSecret) {
-    console.error('[CRON] CRON_SECRET não configurado');
-    return false;
+    console.error('[CRON] CRON_SECRET nao configurado')
+    return false
   }
-  
-  // Vercel envia como "Bearer <secret>"
-  const token = authHeader?.replace('Bearer ', '');
-  
-  return token === cronSecret;
+
+  const token = authHeader?.replace('Bearer ', '') || ''
+
+  // timingSafeEqual exige buffers de mesmo tamanho
+  if (token.length !== cronSecret.length) {
+    return false
+  }
+
+  try {
+    return timingSafeEqual(Buffer.from(token), Buffer.from(cronSecret))
+  } catch {
+    return false
+  }
 }
+
+// ============================================================================
+// SUPABASE ADMIN
+// ============================================================================
 
 /**
  * Cria cliente Supabase com service role (bypass RLS)
  */
 function createSupabaseAdmin() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
   if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error('Supabase credentials not configured');
+    throw new Error('Supabase credentials not configured')
   }
-  
+
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
-  });
+  })
 }
 
+// ============================================================================
+// BUSCAR MENSAGENS (RPC COM LOCKING)
+// ============================================================================
+
 /**
- * Busca mensagens pendentes para processar
- * Usa RPC com FOR UPDATE SKIP LOCKED para evitar race conditions
+ * Busca mensagens pendentes usando RPC com FOR UPDATE SKIP LOCKED.
+ * A RPC ja faz o UPDATE para status='processing' e incrementa attempts.
  */
-async function fetchPendingMessages(supabase: ReturnType<typeof createSupabaseAdmin>): Promise<ScheduledMessage[]> {
-  // Busca mensagens pendentes cujo horário já passou
-  // Em produção, idealmente usar uma função RPC com FOR UPDATE SKIP LOCKED
-  const { data, error } = await supabase
-    .from('scheduled_messages')
-    .select(`
-      id,
-      target_jid,
-      message_type,
-      content,
-      caption,
-      media_url,
-      attempts,
-      max_attempts,
-      instance:whatsapp_instances!inner(
-        api_token,
-        api_url
-      )
-    `)
-    .eq('status', 'pending')
-    .lte('scheduled_for', new Date().toISOString())
-    .lt('attempts', 3) // fallback se max_attempts não for respeitado
-    .order('scheduled_for', { ascending: true })
-    .limit(BATCH_SIZE);
-  
+async function fetchAndLockMessages(
+  supabase: ReturnType<typeof createSupabaseAdmin>
+): Promise<LockedMessage[]> {
+  const { data, error } = await supabase.rpc('fetch_and_lock_pending_messages', {
+    p_batch_size: BATCH_SIZE,
+  })
+
   if (error) {
-    console.error('[CRON] Erro ao buscar mensagens:', error);
-    throw error;
+    console.error('[CRON] Erro ao buscar/travar mensagens:', error)
+    throw error
   }
-  
-  // Type assertion necessário por causa do join
-  return (data || []) as unknown as ScheduledMessage[];
+
+  return (data || []) as LockedMessage[]
 }
 
+// ============================================================================
+// ENVIO DE MENSAGENS (MULTI-INSTANCIA)
+// ============================================================================
+
 /**
- * Marca mensagem como processing
+ * Envia uma mensagem via UAZAPI usando credenciais da instancia especifica.
  */
-async function markAsProcessing(
-  supabase: ReturnType<typeof createSupabaseAdmin>,
-  messageId: string
-): Promise<boolean> {
-  const { error } = await supabase
-    .from('scheduled_messages')
-    .update({
-      status: 'processing',
+async function sendMessage(message: LockedMessage): Promise<SendResult> {
+  try {
+    const baseUrl = process.env.UAZAPI_BASE_URL
+    if (!baseUrl) {
+      return { success: false, error: 'UAZAPI_BASE_URL nao configurado' }
+    }
+
+    if (!message.instance_api_token) {
+      return { success: false, error: 'Token da instancia nao encontrado' }
+    }
+
+    // Cria client com token ESPECIFICO da instancia
+    const uazapi = new UazapiClient({
+      baseUrl,
+      token: message.instance_api_token,
     })
-    .eq('id', messageId)
-    .eq('status', 'pending'); // Double-check para evitar race condition
-  
-  if (error) {
-    console.error(`[CRON] Erro ao marcar ${messageId} como processing:`, error);
-    return false;
+
+    // Extrai phone do JID (remove sufixo @s.whatsapp.net ou @g.us)
+    const phone = message.target_jid.replace('@s.whatsapp.net', '').replace('@g.us', '')
+
+    let response
+
+    switch (message.message_type) {
+      // ----------------------------------------------------------------
+      // TEXTO
+      // ----------------------------------------------------------------
+      case 'text':
+        if (!message.content) {
+          return { success: false, error: 'Conteudo da mensagem vazio' }
+        }
+        response = await uazapi.messages.sendText({
+          phone,
+          message: message.content,
+        })
+        break
+
+      // ----------------------------------------------------------------
+      // IMAGEM
+      // ----------------------------------------------------------------
+      case 'image':
+        if (!message.media_url) {
+          return { success: false, error: 'URL da midia nao fornecida' }
+        }
+        response = await uazapi.messages.sendImage({
+          phone,
+          media: message.media_url,
+          caption: message.caption || undefined,
+        })
+        break
+
+      // ----------------------------------------------------------------
+      // VIDEO
+      // ----------------------------------------------------------------
+      case 'video':
+        if (!message.media_url) {
+          return { success: false, error: 'URL da midia nao fornecida' }
+        }
+        response = await uazapi.messages.sendVideo({
+          phone,
+          media: message.media_url,
+          caption: message.caption || undefined,
+        })
+        break
+
+      // ----------------------------------------------------------------
+      // AUDIO
+      // ----------------------------------------------------------------
+      case 'audio':
+        if (!message.media_url) {
+          return { success: false, error: 'URL da midia nao fornecida' }
+        }
+        response = await uazapi.messages.sendAudio({
+          phone,
+          audio: message.media_url,
+        })
+        break
+
+      // ----------------------------------------------------------------
+      // DOCUMENTO (usa media_filename do banco)
+      // ----------------------------------------------------------------
+      case 'document':
+        if (!message.media_url) {
+          return { success: false, error: 'URL da midia nao fornecida' }
+        }
+        response = await uazapi.messages.sendDocument({
+          phone,
+          media: message.media_url,
+          filename: message.media_filename || 'document',
+        })
+        break
+
+      // ----------------------------------------------------------------
+      // STICKER
+      // ----------------------------------------------------------------
+      case 'sticker':
+        if (!message.media_url) {
+          return { success: false, error: 'URL da midia nao fornecida para sticker' }
+        }
+        response = await uazapi.messages.sendSticker({
+          phone,
+          sticker: message.media_url,
+        })
+        break
+
+      // ----------------------------------------------------------------
+      // LOCATION (content = JSON { latitude, longitude, name })
+      // ----------------------------------------------------------------
+      case 'location': {
+        if (!message.content) {
+          return { success: false, error: 'Conteudo da localizacao vazio' }
+        }
+        let loc: { latitude: number; longitude: number; name?: string }
+        try {
+          loc = JSON.parse(message.content)
+        } catch {
+          return { success: false, error: 'Conteudo da localizacao nao e JSON valido' }
+        }
+        if (loc.latitude == null || loc.longitude == null) {
+          return { success: false, error: 'latitude e longitude sao obrigatorios' }
+        }
+        response = await uazapi.messages.sendLocation({
+          phone,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          name: loc.name,
+        })
+        break
+      }
+
+      // ----------------------------------------------------------------
+      // CONTACT (content = vCard string, caption = nome do contato)
+      // ----------------------------------------------------------------
+      case 'contact': {
+        if (!message.content) {
+          return { success: false, error: 'vCard do contato vazio' }
+        }
+        response = await uazapi.messages.sendContact({
+          phone,
+          contactName: message.caption || 'Contato',
+          vcard: message.content,
+        })
+        break
+      }
+
+      // ----------------------------------------------------------------
+      // TIPO DESCONHECIDO
+      // ----------------------------------------------------------------
+      default:
+        return { success: false, error: `Tipo de mensagem desconhecido: ${message.message_type}` }
+    }
+
+    // Extrai ID da mensagem da resposta (SendMessageResponse tem Id)
+    const messageId = response?.data?.Id
+
+    return { success: true, messageId }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido'
+    console.error(`[CRON] Erro ao enviar mensagem ${message.id}:`, errorMessage)
+    return { success: false, error: errorMessage }
   }
-  
-  return true;
 }
 
-/**
- * Incrementa attempts e marca como processing
- */
-async function incrementAttemptsAndProcess(
-  supabase: ReturnType<typeof createSupabaseAdmin>,
-  messageId: string,
-  currentAttempts: number
-): Promise<boolean> {
-  const { error } = await supabase
-    .from('scheduled_messages')
-    .update({
-      status: 'processing',
-      attempts: currentAttempts + 1,
-    })
-    .eq('id', messageId);
-  
-  return !error;
-}
+// ============================================================================
+// ATUALIZAR STATUS
+// ============================================================================
 
 /**
- * Atualiza status da mensagem para sent/failed
+ * Atualiza status de uma mensagem apos envio (sent ou failed).
  */
 async function updateMessageStatus(
   supabase: ReturnType<typeof createSupabaseAdmin>,
@@ -171,178 +328,86 @@ async function updateMessageStatus(
     ...(success && { sent_at: new Date().toISOString() }),
     ...(externalMessageId && { external_message_id: externalMessageId }),
     ...(errorMessage && { error_message: errorMessage }),
-  };
-  
+  }
+
   const { error } = await supabase
     .from('scheduled_messages')
     .update(update)
-    .eq('id', messageId);
-  
+    .eq('id', messageId)
+
   if (error) {
-    console.error(`[CRON] Erro ao atualizar status de ${messageId}:`, error);
+    console.error(`[CRON] Erro ao atualizar status de ${messageId}:`, error)
   }
 }
 
-/**
- * Envia mensagem via UAZAPI
- */
-async function sendMessage(message: ScheduledMessage): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  try {
-    // Cria cliente UAZAPI com credenciais da instância
-    // Nota: Se cada instância tem URL diferente, precisa passar config
-    // Por ora, usamos as variáveis de ambiente (single instance)
-    const uazapi = createUazapiClient();
-    
-    const phone = message.target_jid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-    
-    let response;
-    
-    switch (message.message_type) {
-      case 'text':
-        if (!message.content) {
-          return { success: false, error: 'Conteúdo da mensagem vazio' };
-        }
-        response = await uazapi.messages.sendText({
-          phone,
-          message: message.content,
-        });
-        break;
-        
-      case 'image':
-        if (!message.media_url) {
-          return { success: false, error: 'URL da mídia não fornecida' };
-        }
-        response = await uazapi.messages.sendImage({
-          phone,
-          media: message.media_url,
-          caption: message.caption || undefined,
-        });
-        break;
-        
-      case 'video':
-        if (!message.media_url) {
-          return { success: false, error: 'URL da mídia não fornecida' };
-        }
-        response = await uazapi.messages.sendVideo({
-          phone,
-          media: message.media_url,
-          caption: message.caption || undefined,
-        });
-        break;
-        
-      case 'audio':
-        if (!message.media_url) {
-          return { success: false, error: 'URL da mídia não fornecida' };
-        }
-        response = await uazapi.messages.sendAudio({
-          phone,
-          audio: message.media_url,
-        });
-        break;
-        
-      case 'document':
-        if (!message.media_url) {
-          return { success: false, error: 'URL da mídia não fornecida' };
-        }
-        response = await uazapi.messages.sendDocument({
-          phone,
-          media: message.media_url,
-          filename: 'document', // TODO: extrair do metadata
-        });
-        break;
-        
-      // Tipos não implementados ainda
-      case 'sticker':
-      case 'location':
-      case 'contact':
-        return { success: false, error: `Tipo ${message.message_type} não implementado ainda` };
-        
-      default:
-        return { success: false, error: `Tipo de mensagem desconhecido: ${message.message_type}` };
-    }
-    
-    // Extrai ID da mensagem da resposta (SendMessageResponse tem Id)
-    const messageId = response?.data?.Id;
-    
-    return { success: true, messageId };
-    
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-    console.error(`[CRON] Erro ao enviar mensagem ${message.id}:`, errorMessage);
-    return { success: false, error: errorMessage };
-  }
-}
+// ============================================================================
+// PROCESSAR LOTE
+// ============================================================================
 
 /**
- * Processa lote de mensagens
+ * Processa o lote de mensagens travadas.
+ * A RPC ja marcou como 'processing' e incrementou attempts.
  */
 async function processMessages(
   supabase: ReturnType<typeof createSupabaseAdmin>,
-  messages: ScheduledMessage[]
+  messages: LockedMessage[]
 ): Promise<ProcessResult> {
   const result: ProcessResult = {
     processed: 0,
     sent: 0,
     failed: 0,
     errors: [],
-  };
-  
+  }
+
   for (const message of messages) {
-    // 1. Marca como processing (com increment de attempts)
-    const locked = await incrementAttemptsAndProcess(supabase, message.id, message.attempts);
-    if (!locked) {
-      console.warn(`[CRON] Mensagem ${message.id} já está sendo processada`);
-      continue;
-    }
-    
-    result.processed++;
-    
-    // 2. Envia via UAZAPI
-    const sendResult = await sendMessage(message);
-    
-    // 3. Atualiza status
+    result.processed++
+
+    // Envia via UAZAPI (com client da instancia correta)
+    const sendResult = await sendMessage(message)
+
+    // Atualiza status no banco
     await updateMessageStatus(
       supabase,
       message.id,
       sendResult.success,
       sendResult.messageId,
       sendResult.error
-    );
-    
+    )
+
     if (sendResult.success) {
-      result.sent++;
-      console.log(`[CRON] ✓ Mensagem ${message.id} enviada`);
+      result.sent++
+      console.log(`[CRON] Mensagem ${message.id} enviada com sucesso`)
     } else {
-      result.failed++;
-      result.errors.push({ id: message.id, error: sendResult.error || 'Unknown error' });
-      console.error(`[CRON] ✗ Mensagem ${message.id} falhou: ${sendResult.error}`);
+      result.failed++
+      result.errors.push({ id: message.id, error: sendResult.error || 'Unknown error' })
+      console.error(`[CRON] Mensagem ${message.id} falhou: ${sendResult.error}`)
     }
   }
-  
-  return result;
+
+  return result
 }
 
+// ============================================================================
+// RETRY DE MENSAGENS FALHADAS
+// ============================================================================
+
 /**
- * Recoloca mensagens falhadas na fila (retry)
+ * Reseta mensagens falhadas para retry via RPC.
+ * A RPC verifica cooldown e max_attempts.
  */
-async function retryFailedMessages(supabase: ReturnType<typeof createSupabaseAdmin>): Promise<number> {
-  // Mensagens que falharam há mais de 5 minutos e ainda têm tentativas disponíveis
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  
-  const { data, error } = await supabase
-    .from('scheduled_messages')
-    .update({ status: 'pending' })
-    .eq('status', 'failed')
-    .lt('attempts', 3) // max_attempts padrão
-    .lt('updated_at', fiveMinutesAgo)
-    .select('id');
-  
+async function retryFailedMessages(
+  supabase: ReturnType<typeof createSupabaseAdmin>
+): Promise<number> {
+  const { data, error } = await supabase.rpc('reset_failed_messages', {
+    p_cooldown_minutes: 5,
+  })
+
   if (error) {
-    console.error('[CRON] Erro ao resetar mensagens falhadas:', error);
-    return 0;
+    console.error('[CRON] Erro ao resetar mensagens falhadas:', error)
+    return 0
   }
-  
-  return data?.length || 0;
+
+  return data ?? 0
 }
 
 // ============================================================================
@@ -350,49 +415,48 @@ async function retryFailedMessages(supabase: ReturnType<typeof createSupabaseAdm
 // ============================================================================
 
 export async function GET(request: NextRequest) {
-  const startTime = Date.now();
-  
-  console.log('[CRON] Iniciando processamento de mensagens agendadas...');
-  
-  // 1. Verificar autenticação
+  const startTime = Date.now()
+
+  console.log('[CRON] Iniciando processamento de mensagens agendadas...')
+
+  // 1. Verificar autenticacao (timingSafeEqual)
   if (!verifyAuth(request)) {
-    console.error('[CRON] Autenticação falhou');
-    return NextResponse.json(
-      { error: 'Unauthorized' },
-      { status: 401 }
-    );
+    console.error('[CRON] Autenticacao falhou')
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
-  
+
   try {
-    // 2. Criar cliente Supabase
-    const supabase = createSupabaseAdmin();
-    
-    // 3. Buscar mensagens pendentes
-    const messages = await fetchPendingMessages(supabase);
-    console.log(`[CRON] Encontradas ${messages.length} mensagens para processar`);
-    
+    // 2. Criar cliente Supabase (service role)
+    const supabase = createSupabaseAdmin()
+
+    // 3. Buscar e travar mensagens pendentes (FOR UPDATE SKIP LOCKED)
+    const messages = await fetchAndLockMessages(supabase)
+    console.log(`[CRON] Encontradas ${messages.length} mensagens para processar`)
+
     // 4. Processar mensagens
     let result: ProcessResult = {
       processed: 0,
       sent: 0,
       failed: 0,
       errors: [],
-    };
-    
+    }
+
     if (messages.length > 0) {
-      result = await processMessages(supabase, messages);
+      result = await processMessages(supabase, messages)
     }
-    
-    // 5. Retry de mensagens falhadas
-    const retried = await retryFailedMessages(supabase);
+
+    // 5. Retry de mensagens falhadas (via RPC)
+    const retried = await retryFailedMessages(supabase)
     if (retried > 0) {
-      console.log(`[CRON] ${retried} mensagens resetadas para retry`);
+      console.log(`[CRON] ${retried} mensagens resetadas para retry`)
     }
-    
-    const duration = Date.now() - startTime;
-    
-    console.log(`[CRON] Concluído em ${duration}ms - Processadas: ${result.processed}, Enviadas: ${result.sent}, Falhas: ${result.failed}`);
-    
+
+    const duration = Date.now() - startTime
+
+    console.log(
+      `[CRON] Concluido em ${duration}ms - Processadas: ${result.processed}, Enviadas: ${result.sent}, Falhas: ${result.failed}`
+    )
+
     return NextResponse.json({
       success: true,
       duration_ms: duration,
@@ -403,24 +467,23 @@ export async function GET(request: NextRequest) {
         retried,
       },
       ...(result.errors.length > 0 && { errors: result.errors }),
-    });
-    
+    })
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[CRON] Erro fatal:', errorMessage);
-    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[CRON] Erro fatal:', errorMessage)
+
     return NextResponse.json(
-      { 
-        success: false, 
+      {
+        success: false,
         error: errorMessage,
         duration_ms: Date.now() - startTime,
       },
       { status: 500 }
-    );
+    )
   }
 }
 
-// Também permite POST (algumas configurações de cron usam POST)
+// Tambem permite POST (Google Cloud Scheduler envia POST por padrao)
 export async function POST(request: NextRequest) {
-  return GET(request);
+  return GET(request)
 }

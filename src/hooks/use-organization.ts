@@ -8,7 +8,6 @@ interface Organization {
   id: string
   name: string
   slug: string
-  logo_url: string | null
   plan: 'free' | 'starter' | 'pro' | 'enterprise'
   created_at: string
   updated_at: string
@@ -17,12 +16,15 @@ interface Organization {
 interface OrganizationMember {
   id: string
   organization_id: string
-  user_id: string
-  role: 'owner' | 'admin' | 'member'
+  role: 'owner' | 'admin' | 'member' | 'viewer'
   created_at: string
 }
 
-interface MembershipWithOrg extends OrganizationMember {
+interface UserWithOrg {
+  id: string
+  organization_id: string | null
+  role: 'owner' | 'admin' | 'member' | 'viewer'
+  created_at: string
   organization: Organization | null
 }
 
@@ -52,47 +54,42 @@ export function useOrganization(): UseOrganizationReturn {
 
   const fetchOrganizations = useCallback(async (userId: string) => {
     try {
-      // Get all organizations the user is a member of
-      const { data: memberships, error: memberError } = await supabase
-        .from('organization_members')
-        .select(`
-          *,
-          organization:organizations(*)
-        `)
-        .eq('user_id', userId)
+      // Get user data
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id, organization_id, role, created_at')
+        .eq('id', userId)
+        .single()
 
-      if (memberError) throw memberError
+      if (userError) throw userError
 
-      const typedMemberships = memberships as MembershipWithOrg[] | null
-      
-      const orgs = typedMemberships
-        ?.map(m => m.organization)
-        .filter((org): org is Organization => org !== null) ?? []
-
-      setOrganizations(orgs)
-
-      // Get or set active organization
-      const activeOrgId = localStorage.getItem(ACTIVE_ORG_KEY)
-      let activeOrg = orgs.find(o => o.id === activeOrgId)
-
-      // If no active org or stored one doesn't exist, use first
-      if (!activeOrg && orgs.length > 0) {
-        activeOrg = orgs[0]
-        localStorage.setItem(ACTIVE_ORG_KEY, activeOrg.id)
+      if (!userData?.organization_id) {
+        setOrganizations([])
+        setOrganization(null)
+        setMembership(null)
+        setLoading(false)
+        return
       }
 
-      if (activeOrg) {
-        setOrganization(activeOrg)
-        const activeMembership = typedMemberships?.find(
-          m => m.organization_id === activeOrg!.id
-        )
-        if (activeMembership) {
-          const { organization: _, ...membershipWithoutOrg } = activeMembership
-          setMembership(membershipWithoutOrg)
-        } else {
-          setMembership(null)
-        }
-      }
+      // Get organization data
+      const { data: orgData, error: orgError } = await supabase
+        .from('organizations')
+        .select('*')
+        .eq('id', userData.organization_id)
+        .single()
+
+      if (orgError) throw orgError
+
+      const org = orgData as Organization
+      setOrganizations([org])
+      setOrganization(org)
+
+      setMembership({
+        id: userData.id,
+        organization_id: userData.organization_id,
+        role: userData.role,
+        created_at: userData.created_at,
+      })
     } catch (err) {
       setError(err as Error)
     } finally {
@@ -112,14 +109,21 @@ export function useOrganization(): UseOrganizationReturn {
 
     // Update membership for the new org
     if (user) {
-      const { data: membershipData } = await supabase
-        .from('organization_members')
-        .select('*')
+      const { data: userData } = await supabase
+        .from('users')
+        .select('id, organization_id, role, created_at')
         .eq('organization_id', orgId)
-        .eq('user_id', user.id)
+        .eq('id', user.id)
         .single()
 
-      setMembership(membershipData)
+      if (userData?.organization_id) {
+        setMembership({
+          id: userData.id,
+          organization_id: userData.organization_id,
+          role: userData.role,
+          created_at: userData.created_at,
+        })
+      }
     }
   }, [organizations, user, supabase])
 
@@ -148,22 +152,23 @@ export function useOrganization(): UseOrganizationReturn {
 
       if (orgError) throw orgError
 
-      // Add user as owner
-      const { error: memberError } = await supabase
-        .from('organization_members')
-        .insert({
-          organization_id: (org as Organization).id,
-          user_id: user.id,
+      const createdOrg = org as Organization
+
+      // Update user to link to organization
+      const { error: userError } = await supabase
+        .from('users')
+        .update({
+          organization_id: createdOrg.id,
           role: 'owner',
         } as never)
+        .eq('id', user.id)
 
-      if (memberError) throw memberError
+      if (userError) throw userError
 
       // Refresh organizations list
       await fetchOrganizations(user.id)
 
       // Set as active
-      const createdOrg = org as Organization
       localStorage.setItem(ACTIVE_ORG_KEY, createdOrg.id)
       setOrganization(createdOrg)
 

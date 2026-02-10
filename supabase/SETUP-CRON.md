@@ -1,5 +1,7 @@
 # Setup: pg_cron + Edge Function para Mensagens Agendadas
 
+> **NOTA:** A migration `001_auth_schema.sql` esta **DEPRECATED**. Use a migration `003_consolidated_schema.sql` como schema base. Veja `supabase/README.md` para instrucoes completas.
+
 Este guia explica como configurar o sistema de mensagens agendadas no Grupzap.
 
 ## Visão Geral
